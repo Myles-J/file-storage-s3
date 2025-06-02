@@ -1,65 +1,81 @@
-# learn-file-storage-s3-golang-starter (Tubely)
+# File Storage S3 Backend
 
-This repo contains the starter code for the Tubely application - the #1 tool for engagement bait - for the "Learn File Servers and CDNs with S3 and CloudFront" [course](https://www.boot.dev/courses/learn-file-servers-s3-cloudfront-golang) on [boot.dev](https://www.boot.dev)
+A Go-based backend for file and video storage with user authentication, video uploads, thumbnail management, and S3-compatible storage support. This project is suitable for learning, prototyping, or as a foundation for a media storage service.
 
-## Quickstart
+## Features
 
-*This is to be used as a *reference\* in case you need it, you should follow the instructions in the course rather than trying to do everything here.
+- User registration and authentication (JWT-based)
+- Video metadata management (create, retrieve, delete)
+- Video and thumbnail upload endpoints
+- SQLite database for metadata
+- S3-compatible storage integration (configurable)
+- RESTful API endpoints
+- Simple web frontend (in `app/`)
 
-## 1. Install dependencies
+## Requirements
 
-- [Go](https://golang.org/doc/install)
-- `go mod download` to download all dependencies
-- [FFMPEG](https://ffmpeg.org/download.html) - both `ffmpeg` and `ffprobe` are required to be in your `PATH`.
+- Go 1.23+
+- SQLite3
+- (Optional) AWS S3 or compatible storage
 
-```bash
-# linux
-sudo apt update
-sudo apt install ffmpeg
+## Setup & Installation
 
-# mac
-brew update
-brew install ffmpeg
-```
+1. **Clone the repository:**
+   ```sh
+   git clone <repo-url>
+   cd file-storage-s3
+   ```
+2. **Install dependencies:**
+   ```sh
+   go mod download
+   ```
+3. **Configure environment variables:**
+   Create a `.env` file in the project root with the following variables:
+   ```env
+   DB_PATH=./tubely.db
+   JWT_SECRET=your_jwt_secret
+   PLATFORM=local
+   FILEPATH_ROOT=./app
+   ASSETS_ROOT=./assets
+   S3_BUCKET=your-s3-bucket
+   S3_REGION=your-s3-region
+   S3_CF_DISTRO=your-cloudfront-distribution
+   PORT=8080
+   ```
+   Adjust values as needed for your environment.
 
-- [SQLite 3](https://www.sqlite.org/download.html) only required for you to manually inspect the database.
+4. **Run the server:**
+   ```sh
+   go run main.go
+   ```
+   The server will start on `http://localhost:8080/app/` by default.
 
-```bash
-# linux
-sudo apt update
-sudo apt install sqlite3
+## Usage
 
-# mac
-brew update
-brew install sqlite3
-```
+- Access the web frontend at `/app/` for uploading and managing videos.
+- API endpoints are available under `/api/`.
 
-- [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)
+## API Endpoints
 
-## 2. Download sample images and videos
+| Method | Endpoint                        | Description            |
+| ------ | ------------------------------- | ---------------------- |
+| POST   | /api/login                      | User login             |
+| POST   | /api/refresh                    | Refresh JWT            |
+| POST   | /api/revoke                     | Revoke refresh token   |
+| POST   | /api/users                      | Register new user      |
+| POST   | /api/videos                     | Create video metadata  |
+| GET    | /api/videos                     | List user's videos     |
+| GET    | /api/videos/{videoID}           | Get video metadata     |
+| DELETE | /api/videos/{videoID}           | Delete video           |
+| POST   | /api/thumbnail_upload/{videoID} | Upload thumbnail       |
+| POST   | /api/video_upload/{videoID}     | Upload video file      |
+| GET    | /api/thumbnails/{videoID}       | Get video thumbnail    |
+| POST   | /admin/reset                    | Reset database (admin) |
 
-```bash
-./samplesdownload.sh
-# samples/ dir will be created
-# with sample images and videos
-```
+## Sample Data
 
-## 3. Configure environment variables
+Run `./samplesdownload.sh` to download sample images and videos into the `samples/` directory.
 
-Copy the `.env.example` file to `.env` and fill in the values.
+## License
 
-```bash
-cp .env.example .env
-```
-
-You'll need to update values in the `.env` file to match your configuration, but _you won't need to do anything here until the course tells you to_.
-
-## 3. Run the server
-
-```bash
-go run .
-```
-
-- You should see a new database file `tubely.db` created in the root directory.
-- You should see a new `assets` directory created in the root directory, this is where the images will be stored.
-- You should see a link in your console to open the local web page.
+[MIT](LICENSE) (or specify your license here)
