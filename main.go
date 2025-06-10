@@ -26,13 +26,11 @@ type apiConfig struct {
 	s3Client         *s3.Client
 }
 
-type thumbnail struct {
-	data      []byte
-	mediaType string
-}
-
 func main() {
-	godotenv.Load(".env")
+	if err := godotenv.Load(".env"); err != nil {
+		log.Fatalf("Error loading .env file: %v", err)
+	}
+
 	pathToDB := MustGetenv("DB_PATH")
 
 	db, err := database.NewClient(pathToDB)

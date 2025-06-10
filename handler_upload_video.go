@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"mime"
 	"net/http"
 	"os"
 	"time"
@@ -53,6 +52,23 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Limit request body size
+	r.Body = http.MaxBytesReader(w, r.Body, uploadLimit)
+
+	// Parse multipart form with 32MB memory limit
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		if err == http.ErrNotMultipart {
+			respondWithError(w, http.StatusBadRequest, "Request must be multipart", err)
+			return
+		}
+		if err == http.ErrMissingBoundary {
+			respondWithError(w, http.StatusBadRequest, "Missing multipart boundary", err)
+			return
+		}
+		respondWithError(w, http.StatusBadRequest, "Couldn't parse multipart form", err)
+		return
+	}
+
 	file, header, err := r.FormFile(formFileKey)
 	if err != nil {
 		respondWithError(w, http.StatusBadRequest, "Couldn't get video file", err)
@@ -65,14 +81,24 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	mediaType, _, err := mime.ParseMediaType(header.Header.Get("Content-Type"))
-	if err != nil {
-		respondWithError(w, http.StatusBadRequest, "Invalid file extension.", err)
+	// Read first 512 bytes for content type detection
+	buf := make([]byte, 512)
+	n, err := file.Read(buf)
+	if err != nil && err != io.EOF {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't read file for content type detection", err)
 		return
 	}
 
+	// Detect actual content type
+	mediaType := http.DetectContentType(buf[:n])
 	if mediaType != "video/mp4" {
-		respondWithError(w, http.StatusBadRequest, "Invalid file extension. Only MP4 is allowed.", nil)
+		respondWithError(w, http.StatusBadRequest, "Invalid file type. Only MP4 is allowed.", nil)
+		return
+	}
+
+	// Reset file position for later use
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't reset file position", err)
 		return
 	}
 

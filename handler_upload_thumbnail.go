@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
+	"github.com/gabriel-vasile/mimetype"
 	"github.com/google/uuid"
 )
 
@@ -64,26 +64,31 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 	}
 	defer file.Close()
 
-	fileExt := strings.ToLower(strings.TrimPrefix(filepath.Ext(header.Filename), "."))
-
-	if fileExt == "" {
-		respondWithError(w, http.StatusBadRequest, "Invalid file extension", nil)
+	// Read first 512 bytes for MIME detection
+	buf := make([]byte, 512)
+	n, err := file.Read(buf)
+	if err != nil && err != io.EOF {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't read file for MIME detection", err)
 		return
 	}
+
+	// Detect actual MIME type
+	mimeType := mimetype.Detect(buf[:n])
+	mediaType := mimeType.String()
 
 	allowedMimeTypes := map[string]bool{
 		"image/jpeg": true,
 		"image/png":  true,
 	}
 
-	mediaType, _, err := mime.ParseMediaType(header.Header.Get("Content-Type"))
-	if err != nil {
-		respondWithError(w, http.StatusBadRequest, "Invalid file extension.", err)
+	if !allowedMimeTypes[mediaType] {
+		respondWithError(w, http.StatusBadRequest, "Invalid file type. Only JPEG and PNG are allowed.", nil)
 		return
 	}
 
-	if !allowedMimeTypes[mediaType] {
-		respondWithError(w, http.StatusBadRequest, "Invalid file extension. Only JPEG and PNG are allowed.", nil)
+	// Reset file position for later use
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't reset file position", err)
 		return
 	}
 
@@ -94,7 +99,7 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 	}
 
 	encodedKey := base64.RawURLEncoding.EncodeToString(cryptoKey)
-	thumbnailName := encodedKey + "." + fileExt
+	thumbnailName := encodedKey + "." + strings.ToLower(strings.TrimPrefix(filepath.Ext(header.Filename), "."))
 	thumbnailPath := filepath.Join(cfg.assetsRoot, thumbnailName)
 
 	thumbnailFile, err := os.Create(thumbnailPath)
