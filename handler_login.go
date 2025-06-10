@@ -34,8 +34,7 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = auth.CheckPasswordHash(params.Password, user.Password)
-	if err != nil {
+	if err := auth.CheckPasswordHash(params.Password, user.Password); err != nil {
 		respondWithError(w, http.StatusUnauthorized, "Incorrect email or password", err)
 		return
 	}
@@ -56,12 +55,11 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = cfg.db.CreateRefreshToken(database.CreateRefreshTokenParams{
+	if _, err = cfg.db.CreateRefreshToken(database.CreateRefreshTokenParams{
 		UserID:    user.ID,
 		Token:     refreshToken,
 		ExpiresAt: time.Now().UTC().Add(time.Hour * 24 * 60),
-	})
-	if err != nil {
+	}); err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't save refresh token", err)
 		return
 	}
