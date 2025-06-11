@@ -1,12 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -20,6 +23,47 @@ const (
 	formFileKey  = "video"
 	tempFileName = "tubely-upload.mp4"
 )
+
+// getVideoAspectRatio returns the aspect ratio of a video file by calling ffprobe
+func getVideoAspectRatio(filePath string) (string, error) {
+	type streamInfo struct {
+		Width  int `json:"width"`
+		Height int `json:"height"`
+	}
+	type ffprobeOutput struct {
+		Streams []streamInfo `json:"streams"`
+	}
+
+	var buf bytes.Buffer
+	cmd := exec.Command("ffprobe", "-v", "error", "-print_format", "json", "-show_streams", filePath)
+	cmd.Stdout = &buf
+	if err := cmd.Run(); err != nil {
+		return "", err
+	}
+
+	var out ffprobeOutput
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		return "", err
+	}
+	if len(out.Streams) == 0 {
+		return "", fmt.Errorf("no streams found")
+	}
+	width := out.Streams[0].Width
+	height := out.Streams[0].Height
+	if width == 0 || height == 0 {
+		return "", fmt.Errorf("invalid width/height")
+	}
+
+	ratio := float64(width) / float64(height)
+	switch {
+	case ratio > 1.7 && ratio < 1.8:
+		return "16:9", nil
+	case ratio < 0.57 && ratio > 0.55:
+		return "9:16", nil
+	default:
+		return "other", nil
+	}
+}
 
 func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request) {
 	videoIDString := r.PathValue("videoID")
@@ -116,6 +160,26 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	aspectRatio, err := getVideoAspectRatio(tempFile.Name())
+	log.Printf("Aspect ratio: %s", aspectRatio)
+
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't get video aspect ratio", err)
+		return
+	}
+
+	filePrefixMap := map[string]string{
+		"16:9":  "landscape",
+		"9:16":  "portrait",
+		"other": "square",
+	}
+
+	filePrefix := filePrefixMap[aspectRatio]
+	if filePrefix == "" {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't get video aspect ratio", err)
+		return
+	}
+
 	// Verify file was copied correctly
 	fileInfo, err := tempFile.Stat()
 	if err != nil {
@@ -142,7 +206,7 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	}
 	log.Printf("Temp file size: %d bytes", fileInfo.Size())
 
-	key := fmt.Sprintf("%s.mp4", uuid.New().String())
+	key := fmt.Sprintf("/%s/%s.mp4", filePrefix, uuid.New().String())
 	log.Printf("Uploading to S3 with key: %s", key)
 
 	s3PutObjectInput := &s3.PutObjectInput{
@@ -162,12 +226,7 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	var videoURL string
-	if cfg.s3CfDistribution != "" {
-		videoURL = fmt.Sprintf("https://%s/%s", cfg.s3CfDistribution, key)
-	} else {
-		videoURL = fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", cfg.s3Bucket, cfg.s3Region, key)
-	}
+	videoURL := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", cfg.s3Bucket, cfg.s3Region, key)
 	videoMetadata.VideoURL = &videoURL
 
 	if err = cfg.db.UpdateVideo(videoMetadata); err != nil {
