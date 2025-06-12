@@ -230,10 +230,12 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	videoMetadata.VideoURL = &videoURL
 
 	if err = cfg.db.UpdateVideo(videoMetadata); err != nil {
-		_, _ = cfg.s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		deleteObjectInput := &s3.DeleteObjectInput{
 			Bucket: aws.String(cfg.s3Bucket),
 			Key:    aws.String(key),
-		})
+		}
+
+		_, _ = cfg.s3Client.DeleteObject(ctx, deleteObjectInput)
 		respondWithError(w, http.StatusInternalServerError, "Couldn't update video metadata", err)
 		return
 	}
