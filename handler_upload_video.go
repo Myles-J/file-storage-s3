@@ -1,15 +1,12 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -19,51 +16,11 @@ import (
 )
 
 const (
-	uploadLimit  = 1 << 30 // 1GB
-	formFileKey  = "video"
-	tempFileName = "tubely-upload.mp4"
+	uploadLimit          = 1 << 30  // 1GB
+	multipartMemoryLimit = 32 << 20 // 32MB
+	formFileKey          = "video"
+	tempFileName         = "tubely-upload.mp4"
 )
-
-// getVideoAspectRatio returns the aspect ratio of a video file by calling ffprobe
-func getVideoAspectRatio(filePath string) (string, error) {
-	type streamInfo struct {
-		Width  int `json:"width"`
-		Height int `json:"height"`
-	}
-	type ffprobeOutput struct {
-		Streams []streamInfo `json:"streams"`
-	}
-
-	var buf bytes.Buffer
-	cmd := exec.Command("ffprobe", "-v", "error", "-print_format", "json", "-show_streams", filePath)
-	cmd.Stdout = &buf
-	if err := cmd.Run(); err != nil {
-		return "", err
-	}
-
-	var out ffprobeOutput
-	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
-		return "", err
-	}
-	if len(out.Streams) == 0 {
-		return "", fmt.Errorf("no streams found")
-	}
-	width := out.Streams[0].Width
-	height := out.Streams[0].Height
-	if width == 0 || height == 0 {
-		return "", fmt.Errorf("invalid width/height")
-	}
-
-	ratio := float64(width) / float64(height)
-	switch {
-	case ratio > 1.7 && ratio < 1.8:
-		return "16:9", nil
-	case ratio < 0.57 && ratio > 0.55:
-		return "9:16", nil
-	default:
-		return "other", nil
-	}
-}
 
 func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request) {
 	videoIDString := r.PathValue("videoID")
@@ -100,7 +57,7 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	r.Body = http.MaxBytesReader(w, r.Body, uploadLimit)
 
 	// Parse multipart form with 32MB memory limit
-	if err := r.ParseMultipartForm(32 << 20); err != nil {
+	if err := r.ParseMultipartForm(multipartMemoryLimit); err != nil {
 		if err == http.ErrNotMultipart {
 			respondWithError(w, http.StatusBadRequest, "Request must be multipart", err)
 			return
@@ -156,11 +113,11 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 
 	_, err = io.Copy(tempFile, file)
 	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Couldn't copy file", err)
+		respondWithError(w, http.StatusInternalServerError, "Couldn't copreturn res.Uy file", err)
 		return
 	}
 
-	aspectRatio, err := getVideoAspectRatio(tempFile.Name())
+	aspectRatio, err := GetVideoAspectRatio(tempFile.Name())
 	log.Printf("Aspect ratio: %s", aspectRatio)
 
 	if err != nil {
@@ -207,12 +164,27 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	log.Printf("Temp file size: %d bytes", fileInfo.Size())
 
 	key := fmt.Sprintf("/%s/%s.mp4", filePrefix, uuid.New().String())
+
+	processedFilePath, err := ProcessVideoForFastStart(tempFile.Name())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't process video for fast start", err)
+		return
+	}
+	defer os.Remove(processedFilePath)
+
+	processedFile, err := os.Open(processedFilePath)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't open processed file", err)
+		return
+	}
+	defer processedFile.Close()
+
 	log.Printf("Uploading to S3 with key: %s", key)
 
 	s3PutObjectInput := &s3.PutObjectInput{
 		Bucket:       aws.String(cfg.s3Bucket),
 		Key:          aws.String(key),
-		Body:         tempFile,
+		Body:         processedFile,
 		ContentType:  aws.String(mediaType),
 		CacheControl: aws.String("public, max-age=31536000"), // 1 year
 	}
@@ -226,7 +198,8 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	videoURL := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", cfg.s3Bucket, cfg.s3Region, key)
+	// Store the bucket and key for later use when generating the presigned URL
+	videoURL := fmt.Sprintf("%s,%s", cfg.s3Bucket, key)
 	videoMetadata.VideoURL = &videoURL
 
 	if err = cfg.db.UpdateVideo(videoMetadata); err != nil {
@@ -240,5 +213,11 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	respondWithJSON(w, http.StatusOK, videoMetadata)
+	videoWithSignedURL, err := cfg.DbVideoToSignedVideo(videoMetadata)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't get signed video URL", err)
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, videoWithSignedURL)
 }

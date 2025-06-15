@@ -77,12 +77,15 @@ func main() {
 	assetsHandler := http.StripPrefix("/assets", http.FileServer(http.Dir(assetsRoot)))
 	mux.Handle("/assets/", noCacheMiddleware(assetsHandler))
 
+	// Auth
 	mux.HandleFunc("POST /api/login", cfg.handlerLogin)
 	mux.HandleFunc("POST /api/refresh", cfg.handlerRefresh)
 	mux.HandleFunc("POST /api/revoke", cfg.handlerRevoke)
 
+	// Users
 	mux.HandleFunc("POST /api/users", cfg.handlerUsersCreate)
 
+	// Videos
 	mux.HandleFunc("POST /api/videos", cfg.handlerVideoMetaCreate)
 	mux.HandleFunc("POST /api/thumbnail_upload/{videoID}", cfg.handlerUploadThumbnail)
 	mux.HandleFunc("POST /api/video_upload/{videoID}", cfg.handlerUploadVideo)

@@ -63,7 +63,7 @@ func (c *Client) autoMigrate() error {
 		title TEXT NOT NULL,
 		description TEXT,
 		thumbnail_url TEXT,
-		video_url TEXT,
+		video_url TEXT TEXT,
 		user_id INTEGER,
 		FOREIGN KEY(user_id) REFERENCES users(id)
 	);
@@ -76,14 +76,17 @@ func (c *Client) autoMigrate() error {
 }
 
 func (c Client) Reset() error {
-	if _, err := c.db.Exec("DELETE FROM refresh_tokens"); err != nil {
-		return fmt.Errorf("failed to reset table refresh_tokens: %w", err)
+
+	qbDeleteQueries := map[string]string{
+		"refresh_tokens": "DELETE FROM refresh_tokens",
+		"users":          "DELETE FROM users",
+		"videos":         "DELETE FROM videos",
 	}
-	if _, err := c.db.Exec("DELETE FROM users"); err != nil {
-		return fmt.Errorf("failed to reset table users: %w", err)
-	}
-	if _, err := c.db.Exec("DELETE FROM videos"); err != nil {
-		return fmt.Errorf("failed to reset table videos: %w", err)
+
+	for tableName, deleteQuery := range qbDeleteQueries {
+		if _, err := c.db.Exec(deleteQuery); err != nil {
+			return fmt.Errorf("failed to reset table %s: %w", tableName, err)
+		}
 	}
 	return nil
 }
